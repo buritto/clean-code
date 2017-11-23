@@ -7,14 +7,60 @@ using FluentAssertions;
 
 namespace Markdown
 {
+    public class Translotor
+    {
+
+        public static List<string> PutLineInList(string markdown, ItemMarkdown itemMarkdown)
+        {
+            var transformedMarkdown = new List<string>() {markdown};
+            transformedMarkdown = SelectTags(transformedMarkdown, itemMarkdown.Separator);
+            if (itemMarkdown.BlockedSeparator == null)
+                return transformedMarkdown;
+            foreach (var separator in itemMarkdown.BlockedSeparator)
+            {
+                transformedMarkdown = SelectTags(transformedMarkdown, separator, itemMarkdown.Separator);
+            }
+            return transformedMarkdown;
+        }
+
+        public static List<string> SelectTags(List<string> markdown, string separator, string markdownSeparator = null)
+        {
+            var transformedMarkdown = new List<string>();
+            foreach (var segment in markdown)
+            {
+                var transformSegamen = segment;
+                if (!transformSegamen.Contains(separator) || segment == markdownSeparator)
+                {
+                    transformedMarkdown.Add(transformSegamen);
+                    continue;
+                }
+                var indexFirstTag = transformSegamen.IndexOf(separator);
+                while (indexFirstTag != -1)
+                {
+                    transformedMarkdown.Add(transformSegamen.Substring(0, indexFirstTag));
+                    transformedMarkdown.Add(separator);
+                    transformSegamen = transformSegamen.Substring(indexFirstTag + separator.Length);
+                    indexFirstTag = transformSegamen.IndexOf(separator);
+                }
+                if (transformSegamen.Length != 0)
+                {
+                    transformedMarkdown.Add(transformSegamen);
+                }
+            }
+            return transformedMarkdown.Where(segment => segment.Length != 0).ToList();
+        }
+
+    }
+
+
     public class ItemMarkdown
     {
         public string OpeningTag { get; }
         public string EndingTag { get; }
         public string Separator { get; }
-        public string BlockedSeparator { get; }
+        public List<string> BlockedSeparator { get; }
 
-        public ItemMarkdown(string openingTag, string endingTag, string separator, string blocedSeparator = null)
+        public ItemMarkdown( string openingTag, string endingTag, string separator, List<string> blocedSeparator = null)
         {
             OpeningTag = openingTag;
             EndingTag = endingTag;
@@ -23,140 +69,149 @@ namespace Markdown
         }
     }
 
-    public class Md
-    {
-        private Stack<ItemMarkdown> separatorStack = new Stack<ItemMarkdown>();
+	public class Md
+	{
 
-        private List<ItemMarkdown> ItemsMarkdown = new List<ItemMarkdown>()
-        {
-            new ItemMarkdown("<strong>", "</strong>", "__", "_"),
-            new ItemMarkdown("<em>", "</em>", "_")
-        };
+	    private List<ItemMarkdown> ItemsMarkdown = new List<ItemMarkdown>()
+	    {
+	        new ItemMarkdown("<strong>", "</strong>", "__", new List<string>(){ "_"}),
+	        new ItemMarkdown("<em>", "</em>", "_")
+	    };
 
         public string RenderToHtml(string markdown)
         {
             var changedMarkdown = markdown;
             foreach (var itemMarkdown in ItemsMarkdown)
             {
-                var transformedMarkdown = PutInList(changedMarkdown, itemMarkdown);
+                var transformedMarkdown = Translotor.PutLineInList(changedMarkdown, itemMarkdown);
                 changedMarkdown = Tagging(transformedMarkdown, itemMarkdown);
             }
-            if (changedMarkdown.Length == 0)
-                return markdown;
+	        if (changedMarkdown.Length == 0)
+	            return markdown;
 
             return DeleteShiled(changedMarkdown);
-        }
+	    }
 
-        private string DeleteShiled(string changedMarkdown)
-        {
-            var lineWithoutShiled = new StringBuilder(changedMarkdown);
-            for (int i = 0; i < lineWithoutShiled.Length; i++)
-            {
-                if (lineWithoutShiled[i] == '\\' && lineWithoutShiled[i + 1] == '_')
-                {
-                    lineWithoutShiled.Remove(i, 1);
-                }
+	    private string DeleteShiled(string changedMarkdown)
+	    {
+	        var lineWithoutShiled = new StringBuilder(changedMarkdown);
+	        for (int i = 0; i < lineWithoutShiled.Length - 1; i++)
+	        {
+	            if (lineWithoutShiled[i] == '\\' && lineWithoutShiled[i+1] == '_')
+	            {
+	                lineWithoutShiled.Remove(i, 1);
+	            }
 
-            }
-            return lineWithoutShiled.ToString();
-        }
+	        }
+	        return lineWithoutShiled.ToString();
+	    }
 
-        private string Tagging(List<string> transformedMarkdown, ItemMarkdown itemMarkdown)
-        {
-            var stackTagging = new Stack<int>();
-            var isBlocked = false;
-            for (int i = 0; i < transformedMarkdown.Count; i++)
-            {
-                if (transformedMarkdown[i] == itemMarkdown.BlockedSeparator)
-                {
-                    isBlocked = !isBlocked;
-                }
-                if (transformedMarkdown[i] == itemMarkdown.Separator)
-                {
-                    if (isBlocked)
-                    {
-                        transformedMarkdown[i] = Blocked(itemMarkdown);
+	    private string Tagging(List<string> transformedMarkdown, ItemMarkdown itemMarkdown)
+	    {
+            var indexOpeningTags = new Stack<int>();
+	        var isBlocked = false;
+	        for (int i = 0; i < transformedMarkdown.Count; i++)
+	        {
+	            if ( transformedMarkdown[i] == itemMarkdown.Separator && IsTag(transformedMarkdown, i))
+	            {
+	                if (isBlocked)
+	                {
+	                    transformedMarkdown[i] = Blocked(itemMarkdown);
                         continue;
                     }
-                    if (i < transformedMarkdown.Count - 1 && !transformedMarkdown[i + 1].StartsWith(" "))
-                    {
-                        if (i - 1 >= 0 && transformedMarkdown[i - 1].EndsWith("\\"))
-                            continue;
-                        stackTagging.Push(i);
-                    }
-                    if (i > 0 && !transformedMarkdown[i - 1].EndsWith(" "))
-                    {
-                        if (transformedMarkdown[i - 1].EndsWith("\\"))
-                            continue;
-                        try
-                        {
-                            var indexOpeningTag = stackTagging.Pop();
-                            if (indexOpeningTag == i)
-                                continue;
-                            transformedMarkdown[indexOpeningTag] = itemMarkdown.OpeningTag;
-                            transformedMarkdown[i] = itemMarkdown.EndingTag;
-                        }
-                        catch (System.InvalidOperationException)
-                        {
-                        }
+	                if (isOpeningTag(transformedMarkdown, i))
+	                {
+	                    indexOpeningTags.Push(i);
+                        continue;
+	                }
+	                if (isEndingTag(transformedMarkdown, i))
+	                {
+	                    if (indexOpeningTags.Count == 0)
+	                        continue;
+	                    transformedMarkdown = Replace(transformedMarkdown, itemMarkdown, indexOpeningTags.Pop(), i);
+	                }
+	            }
+	            if (itemMarkdown.BlockedSeparator!=null && itemMarkdown.BlockedSeparator.Contains(transformedMarkdown[i]) 
+                    && IsTag(transformedMarkdown, i))
+	            {
+	                isBlocked = !isBlocked;
+	            }
+	        }
+	        return ListToString(transformedMarkdown);
+	    }
 
-                    }
-                }
-            }
-
-            var taggingLine = new StringBuilder(transformedMarkdown.Count);
-            for (var i = 0; i < transformedMarkdown.Count; i++)
-            {
-                taggingLine.Append(transformedMarkdown[i]);
-            }
-            return taggingLine.ToString();
+	    private string ListToString(List<string> transformedMarkdown)
+	    {
+	        var taggingLine = new StringBuilder(transformedMarkdown.Count);
+	        for (var i = 0; i < transformedMarkdown.Count; i++)
+	        {
+	            taggingLine.Append(transformedMarkdown[i]);
+	        }
+	        return taggingLine.ToString();
         }
 
-        private string Blocked(ItemMarkdown itemMarkdown)
+	    private List<string> Replace(List<string> transformedMarkdown, ItemMarkdown itemMarkdown, 
+            int indexOpenintTags, int indexEndingTag)
+	    {
+	        transformedMarkdown[indexOpenintTags] = itemMarkdown.OpeningTag;
+	        transformedMarkdown[indexEndingTag] = itemMarkdown.EndingTag;
+	        return transformedMarkdown;
+	    }
+
+	    private bool isEndingTag(List<string> transformedMarkdown, int index)
+	    {
+	        return index == transformedMarkdown.Count -1 || transformedMarkdown[index + 1].StartsWith(" ");
+	    }
+
+        private bool isOpeningTag(List<string> transformedMarkdown, int index)
         {
-            var blocedSeparator = "";
-            for (int i = 0; i < itemMarkdown.Separator.Length; i++)
-            {
-                blocedSeparator += '\\' + itemMarkdown.BlockedSeparator;
-            }
-            return blocedSeparator;
+            return index == 0 || transformedMarkdown[index - 1].EndsWith(" ");
         }
 
-        private List<string> PutInList(string markdown, ItemMarkdown itemMarkdown)
+        private bool IsTag(List<string> transformedMarkdown , int i)
         {
-            var transformedMarkdown = new List<string>();
-            var indexOfSeparatorInMarkdown = markdown.IndexOf(itemMarkdown.Separator);
-            while (indexOfSeparatorInMarkdown != -1)
-            {
-                for (int i = 0; i < indexOfSeparatorInMarkdown; i++)
-                {
-                    transformedMarkdown.Add(markdown[i].ToString());
-                }
-                transformedMarkdown.Add(itemMarkdown.Separator);
-                markdown = markdown.Substring(indexOfSeparatorInMarkdown + itemMarkdown.Separator.Length);
-                indexOfSeparatorInMarkdown = markdown.IndexOf(itemMarkdown.Separator);
-
-            }
-            if (markdown.Length != 0)
-            {
-                transformedMarkdown.Add(markdown);
-            }
-            return transformedMarkdown;
+            if (i > 0 && transformedMarkdown[i - 1].EndsWith("\\"))
+                return false;
+            if (i == 0 && transformedMarkdown.Count == i + 1)
+                return false;
+            if (i == 0 && !transformedMarkdown[i + 1].StartsWith(" "))
+                return true;
+            if (i == 0 && transformedMarkdown[i + 1].StartsWith(" "))
+                return false;
+            if (i == transformedMarkdown.Count - 1 && !transformedMarkdown[i - 1].EndsWith(" "))
+                return true;
+            if (i == transformedMarkdown.Count - 1 && transformedMarkdown[i - 1].EndsWith(" "))
+                return false;
+            var isOpen = i > 0 && transformedMarkdown[i - 1].EndsWith(" ") &&
+                          !transformedMarkdown[i + 1].StartsWith(" ");
+            var isClose = i < transformedMarkdown.Count-1 && !transformedMarkdown[i - 1].EndsWith(" ") &&
+                          transformedMarkdown[i + 1].StartsWith(" ");
+            return isOpen || isClose;
         }
+
+	    private string Blocked(ItemMarkdown itemMarkdown)
+	    {
+	        var blocedSeparator = "";
+	        for (int i = 0; i < itemMarkdown.Separator.Length; i++)
+	        {
+	            blocedSeparator += '\\' + itemMarkdown.BlockedSeparator[0];
+	        }
+	        return blocedSeparator;
+	    }
 
     }
 
-    [TestFixture]
-    public class Md_ShouldRender
-    {
-        [TestCase("aaaa")]
+	[TestFixture]
+	public class Md_ShouldRender
+	{
+	    [TestCase("aaaa")]
         [TestCase(" aa")]
         [TestCase("aa ")]
         [TestCase(" aa ")]
-        public void MarkdownWithoutHandwriting(string markdown)
-        {
-            var md = new Md();
-            Assert.AreEqual(markdown, md.RenderToHtml(markdown));
+	    public void MarkdownWithoutHandwriting(string markdown)
+	    {
+	        var md = new Md();
+	        Assert.AreEqual(markdown, md.RenderToHtml(markdown));
         }
 
         [Test]
@@ -218,21 +273,23 @@ namespace Markdown
         [TestCase("\\_aa\\_ \\_aa\\_", "_aa_ _aa_")]
         [TestCase("\\_aa", "_aa")]
         [TestCase("aa\\_", "aa_")]
+        [TestCase("aa _\\_aaa\\__ as", "aa <em>_aaa_</em> as")]
         public void ShieldedHandwriting(string markdown, string expected)
         {
             var md = new Md();
             Assert.AreEqual(expected, md.RenderToHtml(markdown));
         }
 
-        [TestCase("\\_aaa _aaa_ \\_", "_aaa <em>aaa</em> _")]
-        [TestCase("_aaa \\_aaa\\_ aaa_", "<em>aaa _aaa_ aaa</em>")]
-        [TestCase("_a \\_\\_a\\_\\_ a_", "<em>a __a__ a</em>")]
-        public void LineWithDifferentHandwriting(string markdown, string expected)
-        {
-            var md = new Md();
 
-            Assert.AreEqual(expected, md.RenderToHtml(markdown));
-        }
+	    [TestCase("\\_aaa _aaa_ \\_", "_aaa <em>aaa</em> _")]
+	    [TestCase("_aaa \\_aaa\\_ aaa_", "<em>aaa _aaa_ aaa</em>")]
+	    [TestCase("_a \\_\\_a\\_\\_ a_", "<em>a __a__ a</em>")]
+	    public void LineWithDifferentHandwriting(string markdown, string expected)
+	    {
+	        var md = new Md();
+
+	        Assert.AreEqual(expected, md.RenderToHtml(markdown));
+	    }
 
         [TestCase("__aaaa__", "<strong>aaaa</strong>")]
         [TestCase("__aa__ aa __aa__", "<strong>aa</strong> aa <strong>aa</strong>")]
@@ -254,5 +311,6 @@ namespace Markdown
             var md = new Md();
             Assert.AreEqual(expected, md.RenderToHtml(markdown));
         }
+
     }
 }
